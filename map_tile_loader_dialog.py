@@ -729,12 +729,12 @@ class MapTileLoader_W(QWidget):
         return
     
     def warning_question(self, w, h):
-        dlg = QtWidgets.QMessageBox(self) 
+        dlg = QMessageBox(self) 
         dlg.setWindowTitle('Large output size warning')
         dlg.setText(large_pic_warning_message.format(int(round(w)), int(round(h))))
-        dlg.setStandardButtons(QtWidgets.QMessageBox.No | QtWidgets.QMessageBox.Yes)
-        dlg.button(QtWidgets.QMessageBox.Yes).setText("Continue")
-        dlg.button(QtWidgets.QMessageBox.No).setText("Cancel")
+        dlg.setStandardButtons(QMessageBox.No | QMessageBox.Yes)
+        dlg.button(QMessageBox.Yes).setText("Continue")
+        dlg.button(QMessageBox.No).setText("Cancel")
         return dlg.exec_()  
     
     def set_config(self):
