@@ -52,6 +52,7 @@ class MapTileLoader:
         """
         # Save reference to the QGIS interface
         self.iface = iface
+        self.dlg = None
         # initialize plugin directory
         self.plugin_dir = os.path.dirname(__file__)
         # initialize locale
@@ -192,9 +193,15 @@ class MapTileLoader:
 
         # Create the dialog with elements (after translation) and keep reference
         # Only create GUI ONCE in callback, so that it will only load when the plugin is started
-        if pil_exists:            
-            self.dlg = MapTileLoader_MW()
+        if pil_exists: 
+            if self.dlg is None:           
+                self.dlg = MapTileLoader_MW()
+                self.dlg.destroyed.connect(self.clean_up_dlg)
+            else:
+                self.dlg.showNormal()
         else:
             msg = QMessageBox()
             msg.warning(None, "Warning", "No PIL module on this QGIS build.\nCheck for another version of QGIS with PIL support")
-        
+    
+    def clean_up_dlg(self):
+        self.dlg = None
