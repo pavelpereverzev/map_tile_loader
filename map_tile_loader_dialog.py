@@ -21,7 +21,7 @@
  *                                                                         *
  ***************************************************************************/
 """
-
+import sys 
 import os
 import math 
 import requests 
@@ -29,25 +29,27 @@ import json
 import time 
 
 from osgeo import gdal, osr
-from PIL import Image
-Image.MAX_IMAGE_PIXELS = None
+pil_exists = False 
+try:
+    from PIL import Image
+    Image.MAX_IMAGE_PIXELS = None
+    pil_exists = True
+except:
+    pass 
+
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait
-
-from PyQt5.QtWidgets import QWidget, QComboBox, QLineEdit, QGridLayout, QLabel, QPushButton, \
-    QMessageBox, QProgressBar, QCheckBox, QSpinBox, QFileDialog
-
-from PyQt5 import QtCore
-from PyQt5.QtGui import *
-from PyQt5.QtCore import *
 
 from qgis._core import *
 from qgis.utils import iface
 from qgis.gui import QgsMapToolEmitPoint, QgsRubberBand, QgsMapTool
 from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsGeometry, QgsPointXY, QgsRasterLayer
-from qgis.PyQt import uic
-from qgis.PyQt import QtWidgets
+from qgis.PyQt import QtCore
+from qgis.PyQt import QtGui
+from qgis.PyQt.QtWidgets import QApplication, QMainWindow, QWidget, QComboBox, QLineEdit, QGridLayout, QLabel, QPushButton, \
+    QMessageBox, QProgressBar, QCheckBox, QSpinBox, QFileDialog, QStyle, QVBoxLayout, QHBoxLayout, QListWidget, QAbstractItemView
 
-current_folder = (os.path.dirname(os.path.realpath(__file__)))
+current_folder = os.path.dirname(os.path.realpath(__file__))
+
 cfg_file = os.path.join(current_folder, 'cfg.json')
 global_counter = 0
 
@@ -62,31 +64,57 @@ large_pic_warning_message = 'Image dimensions will be:\n • width: {}\n • hei
 
 # I had to remove OSM url due to their request. 
 # You are free to edit this dict to get tiles from another sources
-dict_sources = {
+# 25.05.2026 - urls has been updated
+default_dict_sources = {
     "Google BaseMap": {"url":"https://mt1.google.com/vt/lyrs=m&x={0}&y={1}&z={2}", "zmax":21},
     "Google Terrain": {"url":"https://mt1.google.com/vt/lyrs=p&x={0}&y={1}&z={2}", "zmax":20},
-    "Google Traffic": {"url":"https://mt1.google.com/vt?lyrs=h@159000000,traffic|seconds_into_week:-1&style=3&x={0}&y={1}&z={2}", "zmax":20},
+    "Google Traffic": {"url":"https://mt1.google.com/vt?lyrs=h,traffic|seconds_into_week:-1&style=3&x={0}&y={1}&z={2}", "zmax":20},
     "Google Satellite": {"url":"https://mt1.google.com/vt/lyrs=s&x={0}&y={1}&z={2}", "zmax":20},
     "Google Hybrid": {"url":"https://mt1.google.com/vt/lyrs=y&x={0}&y={1}&z={2}", "zmax":20},
     "ESRI BaseMap": {"url":"https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{2}/{1}/{0}", "zmax":20},
     "ESRI Terrain": {"url":"https://server.arcgisonline.com/ArcGIS/rest/services/World_Terrain_Base/MapServer/tile/{2}/{1}/{0}", "zmax":20},
     "ESRI Satellite": {"url":"https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{2}/{1}/{0}", "zmax":20},
-    "Yandex BaseMap": {"url":"https://core-renderer-tiles.maps.yandex.net/tiles?l=map&v=21.07.13-0-b210701140430&x={0}&y={1}&z={2}&scale=1&lang=ru_RU", "zmax":21},
-    "Yandex Satellite": {"url":"https://core-sat.maps.yandex.net/tiles?l=sat&v=3.1105.0&x={0}&y={1}&z={2}&scale=1.5&lang=ru_RU", "zmax":21},
-    "Bing BaseMap": {"url":"https://t0.ssl.ak.dynamic.tiles.virtualearth.net/comp/ch/{0}?mkt=ru-RU&it=G,LC,BX,RL&shading=t&n=z&og=1852&cstl=vbp2&o=jpeg", "zmax":19},
-    "Bing Satellite": {"url":"https://t1.ssl.ak.tiles.virtualearth.net/tiles/a{0}.jpeg?g=12225&n=z&prx=1", "zmax":18},
-    "Bing Hybrid": {"url":"https://t1.ssl.ak.dynamic.tiles.virtualearth.net/comp/ch/{0}?mkt=ru-RU&it=A,G,RL&shading=t&n=z&og=1852&o=jpeg", "zmax":18},
+    "Yandex BaseMap": {"url":"https://core-renderer-tiles.maps.yandex.net/tiles?l=map&x={0}&y={1}&z={2}&scale=1&lang=ru_RU", "zmax":21},
+    "Yandex Satellite": {"url":"https://core-sat.maps.yandex.net/tiles?l=sat&x={0}&y={1}&z={2}&scale=1&lang=ru_RU", "zmax":21},
+    "Bing BaseMap": {"url":"https://t0.ssl.ak.dynamic.tiles.virtualearth.net/comp/ch/{0}?mkt=ru-RU&it=G,LC,BX,RL&shading=t&n=z&og=1&cstl=vbp2&o=jpeg", "zmax":19},
+    "Bing Satellite": {"url":"https://t1.ssl.ak.tiles.virtualearth.net/tiles/a{0}.jpeg?g=1&n=z&prx=1", "zmax":18},
+    "Bing Hybrid": {"url":"https://t1.ssl.ak.dynamic.tiles.virtualearth.net/comp/ch/{0}?mkt=ru-RU&it=A,G,RL&shading=t&n=z&og=1&o=jpeg", "zmax":18},
     "MapZen": {"url":"https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{2}/{0}/{1}.png", "zmax":18},
-    "OSM": {"url":"https://tile.openstreetmap.org/{2}/{0}/{1}.png", "zmax":20},
 }
 
 
-def write_cfg(folder, zoom, source):
+
+def get_current_screen_params():
+    # get current active screen params
+    all_screens = QApplication.screens()
+    screen_resolutions = [res.geometry() for res in all_screens]
+    current_pos = QApplication.activeWindow().pos()
+    new_x = current_pos.x() + 1
+    new_y = 1 if current_pos.y()<0 else current_pos.y() + 9
+    new_pnt = QtCore.QPoint(new_x, new_y)
+    int_screen = [f for f in screen_resolutions if f.contains(new_pnt)]
+    if int_screen:
+        active_screen_resolution = int_screen[0]
+    else:
+        active_screen_resolution = screen_resolutions[0]
+    x_screen = active_screen_resolution.x()
+    y_screen = active_screen_resolution.y()
+    dim_x = active_screen_resolution.width()
+    dim_y = active_screen_resolution.height()
+    center_x = x_screen + dim_x / 2
+    center_y = y_screen + dim_y / 2
+    
+    return ScreenParams(x_screen, y_screen, dim_x, dim_y, center_x, center_y)
+
+
+def write_cfg(folder, zoom, source, all_sources, add_pyramids):
     # writing config
     config = {
         "last_folder":folder, 
         "last_zoom":zoom, 
-        "last_source":source
+        "last_source":source,
+        "sources": all_sources,
+        "add_pyramids": add_pyramids
     }
     with open(cfg_file, "w", encoding = 'utf-8') as d:
         json.dump(config, d, indent=4, ensure_ascii=False)
@@ -96,7 +124,7 @@ def write_cfg(folder, zoom, source):
 def read_cfg():
     # reading config
     if not os.path.isfile(cfg_file):
-        write_cfg("", 17, "Google BaseMap")
+        write_cfg("", 17, "Google BaseMap", default_dict_sources, False)
     with open(cfg_file, 'r') as fp:
         data = json.load(fp)
     return data
@@ -196,6 +224,24 @@ def getxy_reverse(tilelX, tileY, zoom, tileSize):
     return(longitude, latitude)
 
 
+def get_qgis_tms_list():
+    s = QgsSettings()
+    dict_tms = {}
+    for k in s.allKeys():
+        k_lower = k.lower()
+        if k_lower.startswith('connections/xyz/items'):
+            name = k.split('connections/xyz/items/')[1].split('/')[0]
+            if name not in dict_tms:
+                # print(name, s.value('connections/xyz/items/{}/zmax'.format(name)))
+                url = s.value('connections/xyz/items/{}/url'.format(name))
+                zmax_v = s.value('connections/xyz/items/{}/zmax'.format(name))
+                zmax = 20
+                if zmax_v:
+                    zmax = int(zmax_v)
+                dict_tms[name] = [url, zmax]    
+    return dict_tms
+
+
 class rband(QgsMapToolEmitPoint):
     """rubberband object"""
     def __init__(self, canvas, app):
@@ -209,7 +255,9 @@ class rband(QgsMapToolEmitPoint):
         
         QgsMapToolEmitPoint.__init__(self, self.canvas)
         self.rubberBand = QgsRubberBand(self.canvas, QgsWkbTypes.PolygonGeometry)
-        self.rubberBand.setColor(QColor(55,150,200,150))
+        self.rubberBand.setColor(QtGui.QColor(0,0,0,25))
+        self.rubberBand.setStrokeColor(QtGui.QColor(0, 100, 255))
+        self.rubberBand.setLineStyle(QtCore.Qt.PenStyle.DotLine)
         self.rubberBand.setWidth(3)
         self.rubberBand.reset()
     
@@ -230,7 +278,7 @@ class rband(QgsMapToolEmitPoint):
     def canvasReleaseEvent(self, e):
         # finish rectangle, miximize main widget
         self.isEmittingPoint = False
-        self.app.setWindowState(Qt.WindowNoState)
+        self.app.setWindowState(QtCore.Qt.WindowState.WindowNoState)
         self.app.btn_save_frame.setDisabled(False)
         self.app.activate_dl()
         self.deactivate()
@@ -263,13 +311,301 @@ class rband(QgsMapToolEmitPoint):
         self.deactivated.emit()
 
 
-class MapTileLoader(QWidget):
+class ScreenParams:
+    def __init__(self, x_screen, y_screen, dim_x, dim_y, center_x, center_y):
+        self.x_screen = x_screen
+        self.y_screen = y_screen
+        self.dim_x = dim_x
+        self.dim_y = dim_y
+        self.center_x = center_x
+        self.center_y = center_y
+
+
+class EditSourceWindow(QMainWindow):
+    def __init__(self, parent=None, source=None, is_new=False):
+        super().__init__(parent)
+        self.setWindowModality(QtCore.Qt.WindowModality.ApplicationModal)
+        self.setWindowTitle('Edit source')
+        self.setMinimumWidth(800)   
+        self.main_widget = parent
+
+        self.widget = QWidget()
+        self.layout = QGridLayout()
+        self.widget.setLayout(self.layout)
+        self.setCentralWidget(self.widget)
+
+        self.label_name = QLabel("Source name:")
+        self.name_line = QLineEdit()
+        self.label_url = QLabel("URL template:")
+        self.url_line = QLineEdit()
+        self.label_zoom = QLabel("Max zoom level:")
+        self.zoom_spin = QSpinBox()
+        self.zoom_spin.setMinimum(1)
+        self.zoom_spin.setMaximum(24)
+
+        self.save_btn = QPushButton("Save")
+        
+        if is_new:
+            self.setWindowTitle('Add source')
+            self.list_existing_sources = get_qgis_tms_list()
+            self.label_combo = QLabel("Source:")
+            self.combo_sources = QComboBox()
+            self.combo_sources.addItems(['-custom-'] + list(self.list_existing_sources.keys()))
+            self.combo_sources.currentTextChanged.connect(self.on_source_change)
+            self.layout.addWidget(self.label_combo, 0, 0, 1, 1)
+            self.layout.addWidget(self.combo_sources, 0, 1, 1, 2)
+            self.zoom_spin.setValue(20)
+        else:
+            current_source_name = source.get('name', '')
+            source_url = source.get('url', '')
+            if all(s in source_url for s in ['{0}', '{1}', '{2}']):
+                current_source_url = source_url.replace('{0}', '{x}').replace('{1}', '{y}').replace('{2}', '{z}')
+            else:
+                current_source_url = source_url.replace('{0}', '{q}')
+            current_source_zoom = source.get('zmax', 20)
+            
+            self.name_line.setText(current_source_name)
+            self.url_line.setText(current_source_url)
+            self.zoom_spin.setValue(current_source_zoom if current_source_zoom else 20)
+
+        self.layout.addWidget(self.label_name, 1, 0, 1, 1)
+        self.layout.addWidget(self.name_line,  1, 1, 1, 2)
+        self.layout.addWidget(self.label_url,  2, 0, 1, 1)
+        self.layout.addWidget(self.url_line,   2, 1, 1, 2)
+        self.layout.addWidget(self.label_zoom, 3, 0, 1, 1)
+        self.layout.addWidget(self.zoom_spin,  3, 1, 1, 2)
+        self.layout.addWidget(self.save_btn,   4, 0, 1, 3)
+        self.layout.setColumnStretch(2, 4)
+
+        self.save_btn.clicked.connect(self.save_source)
+        self.show()
+    
+    def on_source_change(self):
+        # fill fields with selected source data
+        selected_source = self.combo_sources.currentText()
+        if selected_source in self.list_existing_sources:
+            source_data = self.list_existing_sources[selected_source]
+            self.name_line.setText(selected_source)
+            self.url_line.setText(source_data[0])
+            self.zoom_spin.setValue(source_data[1])
+        else:
+            self.name_line.setText("")
+            self.url_line.setText("")
+            self.zoom_spin.setValue(20)
+    
+    def showEvent(self, event):
+        geo = self.geometry()
+        geo.moveCenter(self.parent().geometry().center())
+        QtCore.QTimer.singleShot(0, lambda: self.setGeometry(geo))
+    
+    def save_source(self):
+        source_name = self.name_line.text()
+        source_url = self.url_line.text().replace('{x}', '{0}').replace('{y}', '{1}').replace('{z}', '{2}').replace('{q}', '{0}').strip()
+        source_zoom = self.zoom_spin.value()
+        if not source_name or not source_url:
+            msg = QMessageBox()
+            msg.warning(self, "Warning", "Source name and URL template cannot be empty!")
+            return
+        self.main_widget.ds[source_name] = {"url":source_url, "zmax":source_zoom}
+        self.main_widget.lw.clear()
+        self.main_widget.lw.addItems(list(self.main_widget.ds.keys()))
+        self.close()
+
+
+class SourcesSettings(QMainWindow):
+    # path editor table
+
+    def __init__(self, parent=None, dict_sources=default_dict_sources):
+        super().__init__()
+
+        # settings
+        self.mw = parent
+        self.ds = dict_sources
+        self.setWindowModality(QtCore.Qt.WindowModality.ApplicationModal)
+        self.setWindowTitle('Sources settings')
+
+        self.widget = QWidget()
+        self.layout = QVBoxLayout() 
+        self.widget.setLayout(self.layout)
+        self.setCentralWidget(self.widget)
+        self.left_layout = QVBoxLayout()
+        self.right_layout = QVBoxLayout()
+        self.hlayout = QHBoxLayout()
+        self.hlayout.addLayout(self.left_layout)    
+        self.hlayout.addLayout(self.right_layout)
+
+        self.footer_layout = QHBoxLayout()
+        self.btn_save = QPushButton("Save settings")   
+        self.btn_cancel = QPushButton("Cancel")
+        self.footer_layout.addWidget(self.btn_save) 
+        self.footer_layout.addWidget(self.btn_cancel)
+
+        self.layout.addLayout(self.hlayout) 
+        self.layout.addLayout(self.footer_layout) 
+        
+        self.lw = QListWidget()
+        self.lw.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.lw.setDefaultDropAction(QtCore.Qt.DropAction.MoveAction)
+        self.lw.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.lw.addItems(list(self.ds.keys()))
+
+        self.left_layout.addWidget(self.lw)
+        self.btn_add = QPushButton()
+        self.btn_add.setIcon(QtGui.QIcon(":images/themes/default/symbologyAdd.svg"))
+        self.btn_add.setToolTip('Add new source')
+        
+        self.btn_remove = QPushButton()
+        self.btn_remove.setIcon(QtGui.QIcon(":images/themes/default/symbologyRemove.svg"))
+        self.btn_remove.setToolTip('Remove selected source')
+
+        self.btn_edit = QPushButton()
+        self.btn_edit.setIcon(QtGui.QIcon(":images/themes/default/symbologyEdit.svg"))
+        self.btn_edit.setToolTip('Edit selected source')
+
+        self.btn_reset = QPushButton()
+        self.btn_reset.setIcon(QtGui.QIcon(":images/themes/default/mActionRefresh.svg"))
+        self.btn_reset.setToolTip('Reset to default sources')
+        
+        self.right_layout.addWidget(self.btn_add)
+        self.right_layout.addWidget(self.btn_remove)
+        self.right_layout.addWidget(self.btn_edit)
+        self.right_layout.addWidget(self.btn_reset)
+        self.right_layout.addStretch(1)
+
+        self.btn_add.clicked.connect(self.add_source)
+        self.btn_remove.clicked.connect(self.remove_source)
+        self.btn_edit.clicked.connect(self.edit_source)
+        self.btn_reset.clicked.connect(self.reset_sources)
+        self.btn_cancel.clicked.connect(self.close)
+        self.btn_save.clicked.connect(self.save_settings)
+
+
+        self.show()
+    
+    def save_settings(self):
+        # save settings and close window
+        write_cfg(self.mw.work_folder, self.mw.zoom_slider.value(), self.mw.source_cmbx.currentText(), self.ds, self.mw.add_pyramids.isChecked())
+        out_dict = {}
+        for k in range(self.lw.count()):
+            item = self.lw.item(k)
+            if item.text():
+                out_dict[item.text()] = self.ds.get(item.text(), {})
+                
+        self.mw.dict_sources = out_dict
+        self.mw.source_cmbx.blockSignals(True)
+        self.mw.source_cmbx.clear()
+        self.mw.source_cmbx.addItems(list(out_dict.keys()))
+        self.mw.source_cmbx.blockSignals(False)
+        self.mw.set_max_zoom()
+
+        self.close()
+    
+    def add_source(self):
+        # add new source
+        self.edit_source(is_new=True)
+    
+    def remove_source(self):
+        # remove source
+
+        selected_items = self.lw.selectedItems()
+        if not selected_items:
+            msg = QMessageBox()
+            msg.warning(self, "Warning", "Select source to remove")
+            return
+        selected_item = selected_items[0]
+        source_name = selected_item.text() if selected_item else None
+        question = QMessageBox()
+        question.setWindowTitle('Remove source')    
+        question.setText(f'Are you sure you want to remove source "{source_name}"?')
+        question.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) 
+        question.setDefaultButton(QMessageBox.StandardButton.No)
+        answer = question.exec()        
+        if answer == QMessageBox.StandardButton.No:
+            return
+        else:
+            del self.ds[source_name]
+            self.lw.takeItem(self.lw.row(selected_item))
+
+    def edit_source(self, is_new=False):
+        # edit source
+        source = None
+        if not is_new:
+            selected_items = self.lw.selectedItems()
+            selected_item = selected_items[0] if selected_items else None
+            if not selected_item:
+                msg = QMessageBox()
+                msg.warning(self, "Warning", "Select source to edit")
+                return
+            else:
+                source = self.ds.get(selected_item.text(), {}) if selected_item else None
+                source['name'] = selected_item.text() if selected_item else None
+
+        self.edit_window = EditSourceWindow(self, source, is_new)
+    
+    def reset_sources(self):   
+        # reset sources to default
+        question = QMessageBox()
+        question.setWindowTitle('Reset sources')    
+        question.setText(f'Are you sure you want to reset sources to default? All your changes will be lost.')
+        question.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) 
+        question.setDefaultButton(QMessageBox.StandardButton.No)
+        answer = question.exec()        
+        if answer == QMessageBox.StandardButton.No:
+            return
+        else:
+            self.lw.clear()
+            self.ds = default_dict_sources.copy()
+            self.lw.addItems(list(self.ds.keys()))
+    
+    def showEvent(self, event):
+        geo = self.geometry()
+        geo.moveCenter(self.mw.parent().geometry().center())
+        QtCore.QTimer.singleShot(0, lambda: self.setGeometry(geo))
+
+
+class MapTileLoader_MW(QMainWindow):
+    def __init__(self, parent=None):
+
+        QMainWindow.__init__(self, parent=iface.mainWindow())
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
+        if sys.platform == 'darwin':
+            self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowType.Tool)
+        else:
+            self.setWindowFlags(self.windowFlags() & ~QtCore.Qt.WindowType.WindowStaysOnTopHint)
+        
+        self.screen_params = get_current_screen_params()
+
+        self.central_widget = MapTileLoader_W(self)
+        self.setWindowTitle('MapTileLoader')
+        self.setCentralWidget(self.central_widget)
+        # self.setGeometry(500, 500, 700, 500)
+        # self.move(int(self.screen_params.center_x-700/2), int(self.screen_params.center_y-500/2))
+        self.resize(400, 0)
+
+        # print(self.screen_params.dim_y)
+        self.show()
+
+    def remove_all_rbands(self):
+        if self.central_widget.draw_tool:
+            self.central_widget.draw_tool.rubberBand.reset()
+            self.central_widget.draw_tool.deactivate()
+            iface.mapCanvas().unsetMapTool(self.central_widget.draw_tool) 
+
+    def closeEvent(self, event):
+        # remove all rubberbands
+        if self.central_widget.draw_tool:
+            self.central_widget.draw_tool.rubberBand.reset()
+            self.central_widget.draw_tool.deactivate()
+            iface.mapCanvas().unsetMapTool(self.central_widget.draw_tool) 
+
+    
+
+class MapTileLoader_W(QWidget):
     """ Main widget"""
     def __init__(self, parent=None):
-        super(MapTileLoader, self).__init__(parent)
-        self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
-        self.resize(400, 0)
-        self.setWindowTitle("MapTileLoader")
+        super(MapTileLoader_W, self).__init__(parent)
+        # self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowType.WindowStaysOnTopHint)
+        # self.resize(400, 0)
         self.draw_tool = None 
         self.tr = None
         self.tr_reversed = None
@@ -281,6 +617,11 @@ class MapTileLoader(QWidget):
         # widgets
         self.label_source = QLabel("Source:")
         self.source_cmbx = QComboBox()
+        self.source_edit = QPushButton()
+        self.source_edit.setIcon(QtGui.QIcon(":images/themes/default/mActionEditTable.svg"))
+        self.source_edit.setToolTip('Edit sources')
+        self.source_edit.setMaximumWidth(35)
+
 
         self.label_zoom = QLabel("Zoom level:")
         self.zoom_slider = QSpinBox()
@@ -294,37 +635,52 @@ class MapTileLoader(QWidget):
         self.btn_folder_select.setMaximumWidth(30)
         
         self.label_add_rect = QLabel("Frame:")
-        self.btn_add_rect = QPushButton("+")
+
+        self.btn_add_rect = QPushButton()
+        self.btn_add_rect.setIcon(QtGui.QIcon(":images/themes/default/mActionMapIdentification.svg"))
+        self.btn_add_rect.setMaximumWidth(32)
+        self.btn_add_rect.setToolTip("Draw frame")
+
         self.btn_save_frame = QPushButton("Save frame")
         self.btn_load_frame = QPushButton("Load frame")
+
+        self.lt_frame = QHBoxLayout()
+        self.lt_frame.addWidget(self.btn_add_rect)
+        self.lt_frame.addWidget(self.btn_save_frame)
+        self.lt_frame.addWidget(self.btn_load_frame)
         
         self.btn_load = QPushButton("Download")
         self.add_checkbox = QCheckBox("Add image on load")
-        
+        self.add_pyramids = QCheckBox("Optimize image")
+
         self.pbar = QProgressBar(self)
         
         # setting up interface
         self.grid.addWidget(self.label_source,       0, 1, 1, 5)
-        self.grid.addWidget(self.source_cmbx,        1, 1, 1, 5)
+        self.grid.addWidget(self.source_cmbx,        1, 1, 1, 4)
+        self.grid.addWidget(self.source_edit,        1, 5, 1, 1)
 
         self.grid.addWidget(self.label_zoom,         2, 1, 1, 5)
         self.grid.addWidget(self.zoom_slider,        3, 1, 1, 5)
         
         self.grid.addWidget(self.label_add_rect,     4, 1, 1, 1)
-        self.grid.addWidget(self.btn_add_rect,       5, 1, 1, 1)
-        self.grid.addWidget(self.btn_save_frame,     5, 2, 1, 2)
-        self.grid.addWidget(self.btn_load_frame,     5, 4, 1, 2)
+        # self.grid.addWidget(self.btn_add_rect,       5, 1, 1, 1)
+        # self.grid.addWidget(self.btn_save_frame,     5, 2, 1, 2)
+        # self.grid.addWidget(self.btn_load_frame,     5, 4, 1, 2)
+        self.grid.addLayout(self.lt_frame,           5, 1, 1, 5)
 
         self.grid.addWidget(self.label_path,         6, 1, 1, 5)
         self.grid.addWidget(self.path_line,          7, 1, 1, 4)
         self.grid.addWidget(self.btn_folder_select,  7, 5, 1, 1)
         
         self.grid.addWidget(self.btn_load,           8, 1, 1, 5)
-        self.grid.addWidget(self.add_checkbox,       9, 1, 1, 5)
+        self.grid.addWidget(self.add_checkbox,       9, 1, 1, 3)
+        self.grid.addWidget(self.add_pyramids,       9, 4, 1, 2, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
+        
         self.grid.addWidget(self.pbar,               10, 1, 1, 5)
         
         # adding map sources
-        self.source_cmbx.addItems(list(dict_sources.keys()))
+        # self.source_cmbx.addItems(list(dict_sources.keys()))
 
         # setting fucntions to widget signals
         self.source_cmbx.currentTextChanged.connect(self.set_max_zoom)
@@ -334,23 +690,37 @@ class MapTileLoader(QWidget):
         self.path_line.textChanged.connect(self.activate_dl)
         self.btn_folder_select.clicked.connect(self.select_folder)
         self.btn_load.clicked.connect(self.load)
+        self.source_edit.clicked.connect(self.edit_sources)
 
         # disabling buttons until frame is drawn and path is printed
         self.add_checkbox.setChecked(True)
         self.btn_save_frame.setDisabled(True)
         self.btn_load.setDisabled(True)
 
-        self.proj_transforms()
+        
         self.set_config()
-        self.show()
-
+    
+    def showEvent(self, event):
+        btn_hgt = self.btn_add_rect.frameGeometry().height()
+        self.btn_save_frame.setMinimumHeight(btn_hgt)
+        self.btn_load_frame.setMinimumHeight(btn_hgt)
+        self.source_cmbx.setMinimumHeight(btn_hgt)
+        self.source_edit.setMinimumHeight(btn_hgt)
+        self.path_line.setMinimumHeight(btn_hgt)
+        self.btn_folder_select.setMinimumHeight(btn_hgt)
+        self.btn_load.setMinimumHeight(btn_hgt)
+        self.zoom_slider.setMinimumHeight(btn_hgt)
+    
+    def edit_sources(self):
+        # open sources settings dialog
+        self.sources_settings = SourcesSettings(self, self.dict_sources)
+        # self.sources_settings.show()
 
     def ready_message(self, info_text):
         # custom information message
         msg = QMessageBox()
         msg.information(self, "Success!", info_text)
         return
-
 
     def warning_message(self, err_text):
         # custom warning message
@@ -367,25 +737,27 @@ class MapTileLoader(QWidget):
         dlg.button(QtWidgets.QMessageBox.No).setText("Cancel")
         return dlg.exec_()  
     
-    
     def set_config(self):
         # set config on previous use
         config = read_cfg()
-        idx_source = list(dict_sources.keys()).index(config['last_source'])
+        
         zoom = config['last_zoom']
         folder = config['last_folder']
+        self.dict_sources = config.get('sources', default_dict_sources)
+        idx_source = list(self.dict_sources.keys()).index(config['last_source']) if config['last_source'] in self.dict_sources else 0
+        self.source_cmbx.addItems(list(self.dict_sources.keys()))
         self.source_cmbx.setCurrentIndex(idx_source)
         self.zoom_slider.setValue(zoom)
         self.path_line.setText(folder)
+        self.add_pyramids.setChecked(config.get('add_pyramids', False))
 
-    
     def set_max_zoom(self):
         # set maximum tile source level
         current_source = self.source_cmbx.currentText()
-        max_zoom = dict_sources[current_source]['zmax']
-        self.zoom_slider.setMaximum(max_zoom)
+        if current_source:
+            max_zoom = self.dict_sources[current_source]['zmax']
+            self.zoom_slider.setMaximum(max_zoom)
         
-    
     def select_folder(self):
         # seelct folder for output rasters
         result = QFileDialog.getExistingDirectory(self, 'Select Folder')
@@ -393,7 +765,6 @@ class MapTileLoader(QWidget):
             self.path_line.setText(result)
         return
     
-
     def activate_dl(self):
         # check if rectangle is drawn and path is pointed
         # if yes then make download button enabled
@@ -404,7 +775,6 @@ class MapTileLoader(QWidget):
             self.btn_load.setDisabled(False)
         return
 
-    
     def check_folder(self):
         # check if folder exists
         path = self.path_line.text()
@@ -412,7 +782,6 @@ class MapTileLoader(QWidget):
             self.work_folder = path
             return True
         return False
-
 
     def draw_rect(self):
         # running rect tool
@@ -422,7 +791,6 @@ class MapTileLoader(QWidget):
         self.draw_tool = rband(iface.mapCanvas(), self)
         iface.mapCanvas().setMapTool(self.draw_tool) 
         self.showMinimized()
-    
     
     def proj_transforms(self):
         # set crs transforms
@@ -434,10 +802,12 @@ class MapTileLoader(QWidget):
         self.tr_3857 = QgsCoordinateTransform(destCrs, destCrs_3857, QgsProject.instance())
         self.tr_reversed = QgsCoordinateTransform(destCrs, sourceCrs , QgsProject.instance())
 
-
     def rband_coors(self):
         # transforming rectangle coordinates into project crs
         if self.draw_tool:
+            # get project transforms 
+            self.proj_transforms()
+            
             pnt_start = QgsPointXY(self.draw_tool.start_pos_x, self.draw_tool.start_pos_y)
             pnt_end = QgsPointXY(self.draw_tool.end_pos_x, self.draw_tool.end_pos_y) 
             pnt_geom_start = QgsGeometry().fromPointXY(pnt_start)
@@ -447,13 +817,11 @@ class MapTileLoader(QWidget):
             pnt_geom_end.transform(self.tr)
             return pnt_geom_start, pnt_geom_end
 
-    
     def load(self):
         # initializing download
         if self.draw_tool:
             self.pnt_geom_start, self.pnt_geom_end = self.rband_coors()
             self.get_raster(self.pnt_geom_start, self.pnt_geom_end, self.zoom_slider.value())
-
 
     def download_image(self, session, url, path_file):
         # tile load
@@ -475,13 +843,11 @@ class MapTileLoader(QWidget):
                 time.sleep(1)
         return path_file
 
-    
     def fetch(self, session, url, path_file):
         # tile download
         self.download_image(session, url, path_file)
         return 
 
-   
     def stitch_image(self, list_images, img):
         # open each tile and collect them on PIL canvas
         for img_data in list_images:
@@ -494,8 +860,9 @@ class MapTileLoader(QWidget):
                 img.paste(im_saved, (off_x, t_height-off_y))
         return 
 
-
     def get_raster(self, pnt_start, pnt_end, zoom):
+        
+
         # get tiles and stitch them into single georeferenced image
         tileSize = 256
         img_size_limit = 20000
@@ -512,7 +879,7 @@ class MapTileLoader(QWidget):
         f_name_pref = '{}'.format(str_datetime)
 
         # filenames and paths
-        tile_url = dict_sources[current_source]['url']
+        tile_url = self.dict_sources[current_source]['url']
         file_pil = os.path.join(self.work_folder, 'pil_img.jpeg')
         file_pil_clip = os.path.join(self.work_folder, 'pil_img_clip.jpeg')
         final_file_out = os.path.join(self.work_folder,'{}_{}.tif'.format(current_source, f_name_pref))
@@ -644,10 +1011,56 @@ class MapTileLoader(QWidget):
 
         # georeferencing
         ds = gdal.Translate(final_file_out, file_pil_clip)
+
+        '''
+        # old georeferencing method with GCPs, but it causes some distortions in resulting image and worse quality in QGIS
         sr = osr.SpatialReference()
         sr.ImportFromEPSG(3857) 
         ds.SetGCPs(gcps, sr.ExportToWkt())
         ds = None
+        '''
+
+        cropped_width = ds.RasterXSize
+        cropped_height = ds.RasterYSize
+
+        pixel_width = (lon_end_3857 - lon_start_3857) / cropped_width
+        pixel_height = (lat_end_3857 - lat_start_3857) / cropped_height
+
+        geotransform = (
+            lon_start_3857,
+            pixel_width,
+            0,
+            lat_start_3857,
+            0,
+            -abs(pixel_height)
+        )
+
+        ds.SetGeoTransform(geotransform)
+
+        sr = osr.SpatialReference()
+        sr.ImportFromEPSG(3857)
+
+        ds.SetProjection(sr.ExportToWkt())
+        ds.FlushCache()
+        ds = None
+
+        if self.add_pyramids.isChecked():
+            self.pbar.setFormat('building pyramids...')
+            QtCore.QCoreApplication.processEvents()
+            ds = gdal.Open(final_file_out, gdal.GA_Update)
+            
+            levels = [2, 4, 8, 16, 32, 64]
+
+            ds.BuildOverviews(
+                resampling="GAUSS",
+                overviewlist=levels,
+                callback=gdal.TermProgress_nocb
+            )
+
+            # Сбрасываем кеш и закрываем файл
+            ds.FlushCache()
+            ds = None
+            # del img  # close the dataset (Python object and pointers)
 
         # add raster to project
         if self.add_checkbox.isChecked():
@@ -662,12 +1075,14 @@ class MapTileLoader(QWidget):
                 os.remove(file)
 
         # save last map and zoom choice
-        write_cfg(self.work_folder, zoom, current_source)
+        write_cfg(self.work_folder, zoom, current_source, self.dict_sources, self.add_pyramids.isChecked())
         self.pbar.setValue(0)
+        self.pbar.reset()
+        self.pbar.resetFormat()
         QtCore.QCoreApplication.processEvents()
+        
         self.ready_message("Image from {} is ready.".format(current_source))
         return        
-    
     
     def save_frame(self):
         # save current drawn rectangle to *.xtnt file
@@ -681,7 +1096,6 @@ class MapTileLoader(QWidget):
                     wfile.write(data_str)
         return
 
-            
     def load_frame(self):
         # load rectangle coordinates from *.xtnt file
         f_open = QFileDialog.getOpenFileName(self, "Select Frame", "", "*.xtnt")
@@ -715,11 +1129,10 @@ class MapTileLoader(QWidget):
             self.activate_dl()
         return
             
-        
-    def closeEvent(self, event):
-        # remove all rubberbands
-        if self.draw_tool:
-            self.draw_tool.rubberBand.reset()
-            self.draw_tool.deactivate()
-            iface.mapCanvas().unsetMapTool(self.draw_tool) 
-            
+'''    
+if pil_exists:            
+    dlg = MapTileLoader_MW()
+else:
+    msg = QMessageBox()
+    msg.warning(None, "Warning", "No PIL module on this QGIS build.\nCheck for another version of QGIS with PIL support")
+'''
