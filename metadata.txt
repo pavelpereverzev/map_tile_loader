@@ -5,33 +5,43 @@
 [general]
 name=MapTileLoader
 qgisMinimumVersion=3.0
+qgisMaximumVersion=4.99
 description=Download georeferenced parts of tile map services
-version=0.2.0
+version=1.0.0
 author=Pavel Pereverzev
 email=pasha004@yandex.ru
 
-about=This plugin is a simple tool for downloading parts of popular web map services. 
+about=This plugin is a tool for downloading parts of popular web map services. 
     Only for non-commercial and educational purposes.
-    WARNING: Works only with Python's Pillow module which has to be installed in QGIS
+    WARNING: Works only with Python's PIL module
     
     A brief instruction. 
-    1. Select a web map source you want to clip 
+    1. Select a web map source you want to get a part from 
     2. Set zoom level (the more value - the longer download process will be) 
-    3. Draw a frame on map like a rectangle 
+    3. Draw a frame on map using "Draw frame" button
     4. Set folder to save your image 
     5. Press download. 
 
-    In result you will see a georeferenced image cropped to frame. Additionaly you can unset "Add image on load" if you don't want images to be automatically added to current project. You can also save your frames to *.xtnt files and then load them in after closing the widget
+    After download is completed you will see a georeferenced image cropped to frame. 
+    Additionaly you can unset "Add image on load" if you don't want images to be automatically added to current project. 
+    You can also save your frames to *.xtnt files and then load them in after closing the widget.
+    "Optimize image" checkbox will make image faster to load in QGIS due to building of overviews for zoom levels.
+    "Edit source" button on the right from source combobox is a setting that allows user to add new/edit/remove XYZ maps sources. You can add a source from your saved connections from QGIS browser or create a new connection here.
 
-tracker=https://github.com/Kylsha/map_tile_loader
-repository=https://github.com/Kylsha/map_tile_loader
+tracker=https://github.com/pavelpereverzev/map_tile_loader/issues
+repository=https://github.com/pavelpereverzev/map_tile_loader
 # End of mandatory metadata
 
 # Recommended items:
 
 hasProcessingProvider=no
 # Uncomment the following line and add your changelog:
-# changelog=0.2.0
+# changelog=1.0.0
+  pyqt6 support
+  change of georeference method
+  custom xyz-urls adding
+  slight interface changes and fixes
+  0.2.0
   Much faster download process
   Georeferencing in EPSG:3857. It allows to have a flat output image and better look of raster layer quality in QGIS rather than in EPSG:4326
   Warning about too big file size
@@ -48,7 +58,7 @@ hasProcessingProvider=no
 # Tags are comma separated with spaces allowed
 tags=python
 
-homepage=https://github.com/Kylsha/map_tile_loader
+homepage=https://github.com/pavelpereverzev/map_tile_loader
 category=Plugins
 icon=icon.png
 # experimental flag
@@ -68,3 +78,5 @@ Category of the plugin: Raster, Vector, Database or Web
 # If the plugin can run on QGIS Server.
 server=False
 
+# Keep this deprecated flag for QGIS 3.x.x versions which support Qt6
+supportsQt6=True
